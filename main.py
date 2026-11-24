@@ -262,20 +262,112 @@ def system_info():
 
 # ---------- Monitoring: teplota / zatazenie ----------
 
+_CPU_TIMES_PREV = None
+
+
+def _cpu_load_windows_ctypes():
+    """CPU % cez Windows GetSystemTimes (bez psutil)."""
+    global _CPU_TIMES_PREV
+    try:
+        import ctypes
+        class FT(ctypes.Structure):
+            _fields_ = [("dwLowDateTime", ctypes.c_ulong),
+                        ("dwHighDateTime", ctypes.c_ulong)]
+        idle, kernel, user = FT(), FT(), FT()
+        ctypes.windll.kernel32.GetSystemTimes(
+            ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user))
+        def to_int(f):
+            return (f.dwHighDateTime << 32) | f.dwLowDateTime
+        cur = (to_int(idle), to_int(kernel), to_int(user))
+        if _CPU_TIMES_PREV is None:
+            _CPU_TIMES_PREV = cur
+            return 0.0
+        prev = _CPU_TIMES_PREV
+        _CPU_TIMES_PREV = cur
+        idle_d = cur[0] - prev[0]
+        total_d = (cur[1] - prev[1]) + (cur[2] - prev[2])
+        if total_d <= 0:
+            return 0.0
+        return round((1.0 - idle_d / total_d) * 100, 1)
+    except Exception:
+        return None
+
+
+def _cpu_load_proc_stat():
+    """CPU % cez /proc/stat (Linux, bez psutil)."""
+    global _CPU_TIMES_PREV
+    try:
+        with open("/proc/stat") as f:
+            parts = f.readline().split()
+        vals = [int(x) for x in parts[1:8]]
+        idle = vals[3] + vals[4]
+        total = sum(vals)
+        cur = (idle, total)
+        if _CPU_TIMES_PREV is None:
+            _CPU_TIMES_PREV = cur
+            return 0.0
+        prev = _CPU_TIMES_PREV
+        _CPU_TIMES_PREV = cur
+        d_idle = cur[0] - prev[0]
+        d_total = cur[1] - prev[1]
+        if d_total <= 0:
+            return 0.0
+        return round((1.0 - d_idle / d_total) * 100, 1)
+    except Exception:
+        return None
+
+
 def get_cpu_load():
-    """CPU zatazenie v %. psutil = presne, inak odhad z nasho stressu."""
+    """CPU zatazenie v %. Poradie: psutil -> Windows ctypes -> /proc/stat."""
     try:
         if HAS_PSUTIL:
             return float(psutil.cpu_percent(interval=0.2))
     except Exception:
         pass
+    if sys.platform == "win32":
+        v = _cpu_load_windows_ctypes()
+        if v is not None:
+            return v
+    else:
+        v = _cpu_load_proc_stat()
+        if v is not None:
+            return v
     return None
 
 
 def get_ram_load():
+    """RAM zatazenie v %. Poradie: psutil -> Windows GlobalMemoryStatusEx -> /proc/meminfo."""
     try:
         if HAS_PSUTIL:
             return float(psutil.virtual_memory().percent)
+    except Exception:
+        pass
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            class MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = MS()
+            st.dwLength = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+            return float(st.dwMemoryLoad)
+        with open("/proc/meminfo") as f:
+            mem = {}
+            for line in f:
+                k, v = line.split(":", 1)
+                mem[k.strip()] = int(v.split()[0])
+            total = mem.get("MemTotal", 0)
+            avail = mem.get("MemAvailable", mem.get("MemFree", 0))
+            if total:
+                return round((1 - avail / total) * 100, 1)
     except Exception:
         pass
     return None
@@ -298,6 +390,20 @@ def get_cpu_temp():
     except Exception:
         pass
     if sys.platform == "win32":
+        # 1) OpenHardwareMonitor / LibreHardwareMonitor (ak je nainstalovany)
+        for ns in ("root\\OpenHardwareMonitor", "root\\LibreHardwareMonitor"):
+            out = run_cmd(["powershell", "-NoProfile", "-Command",
+                           f"Get-CimInstance -Namespace {ns} -ClassName Sensor "
+                           "| Where-Object {{ $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' }} "
+                           "| Select-Object -First 1 -ExpandProperty Value"])
+            try:
+                if out:
+                    v = float(out.splitlines()[0].strip())
+                    if 0 < v < 130:
+                        return round(v, 1)
+            except Exception:
+                pass
+        # 2) WMI MSAcpi_ThermalZoneTemperature (nie kazdy PC to ma)
         out = run_cmd(["wmic", "/namespace:\\\\root\\wmi", "PATH",
                        "MSAcpi_ThermalZoneTemperature", "get", "CurrentTemperature"])
         for line in out.splitlines():
@@ -309,7 +415,7 @@ def get_cpu_temp():
 
 
 def get_gpu_stats():
-    """NVIDIA: teplota, zatazenie %, spotreba. Inak None."""
+    """NVIDIA cez nvidia-smi: teplota, zatazenie %, spotreba. Inak OHM, inak None."""
     smi = run_cmd(["nvidia-smi",
                    "--query-gpu=temperature.gpu,utilization.gpu,power.draw",
                    "--format=csv,noheader,nounits"])
@@ -517,6 +623,15 @@ class BenchApp:
         tk.Label(sf, text="Vlastný čas: klikni do poľa a napíš napr. 45 min, 90 min alebo 3 hod (1 min – 8 hod).",
                  font=("Segoe UI", 8), fg="#666").grid(row=2, column=0, columnspan=7, sticky="w")
 
+        # --- Teplota a zatazenie (velke cisla) ---
+        tf = tk.LabelFrame(root, text=" Teplota a zaťaženie ", padx=8, pady=4)
+        tf.pack(fill="x", padx=12, pady=4)
+        self.temp_label = tk.Label(tf, text="CPU: — °C / — %   |   GPU: — °C / — %   |   RAM: — %",
+                                   font=("Segoe UI", 11, "bold"))
+        self.temp_label.pack(anchor="w")
+        tk.Label(tf, text="Teplota CPU ide cez psutil / OpenHardwareMonitor / WMI — ak PC teplotu nedá, ukáže len zaťaženie. GPU teplota ide na NVIDIA cez nvidia-smi.",
+                 font=("Segoe UI", 8), fg="#666").pack(anchor="w")
+
         # --- Graf ---
         gf = tk.LabelFrame(root, text=" Graf — teplota a zaťaženie (živý, každé 2 s) ", padx=8, pady=4)
         gf.pack(fill="x", padx=12, pady=4)
@@ -613,6 +728,8 @@ class BenchApp:
             self.live_label.config(
                 text=f"CPU: {cpu_load:.0f}%  |  RAM: {ram_txt}  |  Disk obsadený: {disk_txt}  |  "
                      f"Teplota CPU: {temp_txt}  |  GPU: {gpu_txt}")
+            self.temp_label.config(
+                text=f"CPU: {temp_txt} / {cpu_load:.0f}%   |   GPU: {gpu_txt}   |   RAM: {ram_txt}")
             self.draw_graph()
             # Bezpecnost: auto-stop pri 95 °C
             if self.stress_running and cpu_temp is not None and cpu_temp >= 95:

@@ -73,3 +73,12 @@ Veľkosť exe: cca 10–15 MB.
 - Jeden živý graf, každé 2 s: CPU % (zelená), RAM % (modrá), Disk obsadený % (fialová), GPU zaťaženie / teplota (oranžová), teplota CPU °C (červená)
 - Pod grafom sú zaškrtávacie políčka Graf: CPU / RAM / Disk / GPU / Teplota — čo nechceš vidieť, odškrtni
 - Aktuálne čísla aj ako text pod grafom: CPU %, RAM %, Disk obsadený %, teplota CPU, GPU
+
+## Teplota a zaťaženie CPU / GPU (vylepšené v 0.2)
+
+- Veľký panel hore: CPU teplota + zaťaženie %, GPU teplota + zaťaženie %, RAM %
+- Zaťaženie CPU ide aj bez `psutil` — na Windows cez GetSystemTimes, na Linuxe cez /proc/stat
+- Zaťaženie RAM ide aj bez `psutil` — na Windows cez GlobalMemoryStatusEx
+- Teplota CPU: psutil → OpenHardwareMonitor / LibreHardwareMonitor (ak je nainštalovaný) → WMI
+- Teplota + zaťaženie GPU: NVIDIA cez `nvidia-smi`
+- Ak PC teplotu nedá zistiť, appka ukáže len zaťaženie a napíše "nedá sa zistiť" — nie je to chyba appky
