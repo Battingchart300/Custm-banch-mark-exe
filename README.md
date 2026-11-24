@@ -87,3 +87,10 @@ Veľkosť exe: cca 10–15 MB.
 
 - GPU test okno aj GPU stress okno majú pevnú veľkosť, nie sú topmost a nevolá sa focus ani lift — okno zostane tam, kde je, a neskáče dopredu/dozadu.
 - Zatvorenie GPU okna krížikom zastaví test (Stop všetko).
+
+## Žiadne preblikávanie (vylepšené v 0.2)
+
+- Aktualizuje sa LEN graf (canvas) — mriežka sa nakreslí raz a zostáva, mažú sa len dátové čiary.
+- Text pod grafom sa prepíše len keď sa hodnota naozaj zmenila.
+- Teplota CPU sa číta len každých 10 s, nie každé 2 s (PowerShell/WMI volanie brzdilo UI).
+- `log()` ani `set_status()` už nevolajú `update_idletasks()` — to prekresľovalo celé okno a bolo hlavnou príčinou preblikávania.

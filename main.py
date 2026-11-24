@@ -536,6 +536,14 @@ class BenchApp:
         self.monitor_start = time.time()
         self.gpu_win = None
         self.gpu_cv = None
+        # Graf sa aktualizuje sam - text pod nim len ked sa zmenil,
+        # aby sa neprekreslovalo cele okno.
+        self._last_live = ""
+        self._last_temp = ""
+        # Teplota CPU sa cita len kazdy 5. tick (10 s) - PowerShell/WMI volanie
+        # kazde 2 s zatazovalo UI a prispievalo k preblikavaniu.
+        self._temp_tick = 0
+        self._cpu_temp_cached = None
         # Graf: co sa ma kreslit (vsetko zapnute)
         self.var_g_cpu = tk.BooleanVar(value=True)
         self.var_g_ram = tk.BooleanVar(value=True)
@@ -695,11 +703,12 @@ class BenchApp:
     def log(self, s):
         self.out.insert("end", s)
         self.out.see("end")
-        self.root.update_idletasks()
+        # Ziadne update_idletasks() - to prekreslovalo cele okno a preblikavalo.
+        # Mainloop si prekreslenie spravi sam, len tam, kde treba.
 
     def set_status(self, s):
         self.status.config(text=s)
-        self.root.update_idletasks()
+        # Ziadne update_idletasks() - vid log().
 
     # ----- Monitor + graf -----
     def monitor_tick(self):
@@ -707,7 +716,10 @@ class BenchApp:
             cpu_load = get_cpu_load()
             if cpu_load is None:
                 cpu_load = 100.0 if self.stress_running and self.var_cpu.get() else 0.0
-            cpu_temp = get_cpu_temp()
+            self._temp_tick += 1
+            if self._temp_tick % 5 == 1:
+                self._cpu_temp_cached = get_cpu_temp()
+            cpu_temp = self._cpu_temp_cached
             gpu = get_gpu_stats()
             gpu_temp = gpu["temp"] if gpu else None
             gpu_load = gpu["load"] if gpu else None
@@ -725,11 +737,18 @@ class BenchApp:
             temp_txt = f"{cpu_temp:.1f} °C" if cpu_temp is not None else "nedá sa zistiť"
             ram_txt = f"{ram_load:.0f}%" if ram_load is not None else "—"
             disk_txt = f"{disk_pct:.0f}%" if disk_pct is not None else "—"
-            self.live_label.config(
-                text=f"CPU: {cpu_load:.0f}%  |  RAM: {ram_txt}  |  Disk obsadený: {disk_txt}  |  "
-                     f"Teplota CPU: {temp_txt}  |  GPU: {gpu_txt}")
-            self.temp_label.config(
-                text=f"CPU: {temp_txt} / {cpu_load:.0f}%   |   GPU: {gpu_txt}   |   RAM: {ram_txt}")
+            # Aktualizuje sa LEN graf (canvas) a 2 textove riadky - a tie len ked
+            # sa text naozaj zmenil. Ziadne root.update(), ziadne prekreslenie
+            # celeho okna, ziadne pack/unpack. Preto okno nepreblikava.
+            live_txt = (f"CPU: {cpu_load:.0f}%  |  RAM: {ram_txt}  |  Disk obsadený: {disk_txt}  |  "
+                        f"Teplota CPU: {temp_txt}  |  GPU: {gpu_txt}")
+            temp_txt2 = f"CPU: {temp_txt} / {cpu_load:.0f}%   |   GPU: {gpu_txt}   |   RAM: {ram_txt}"
+            if live_txt != self._last_live:
+                self.live_label.config(text=live_txt)
+                self._last_live = live_txt
+            if temp_txt2 != self._last_temp:
+                self.temp_label.config(text=temp_txt2)
+                self._last_temp = temp_txt2
             self.draw_graph()
             # Bezpecnost: auto-stop pri 95 °C
             if self.stress_running and cpu_temp is not None and cpu_temp >= 95:
@@ -744,15 +763,19 @@ class BenchApp:
 
     def draw_graph(self):
         cv = self.graph
-        cv.delete("all")
+        # Len data sa mazu a kreslia nanovo - mriezka ostava, takze canvas
+        # nepreblikava. Ziadne mazanie celeho canvasu.
+        cv.delete("data")
         w, h = 700, 130
         if len(self.history) < 2:
-            cv.create_text(w // 2, h // 2, text="Čakám na dáta...", fill="#888")
+            cv.create_text(w // 2, h // 2, text="Čakám na dáta...", fill="#888", tags="data")
             return
-        # mriezka 0 / 50 / 100
-        for val, y in [(100, 8), (50, h // 2), (0, h - 8)]:
-            cv.create_line(30, y, w - 5, y, fill="#eee")
-            cv.create_text(15, y, text=str(val), font=("Consolas", 8), fill="#888")
+        # mriezka 0 / 50 / 100 - kresli sa len raz
+        if not getattr(self, "_grid_drawn", False):
+            for val, y in [(100, 8), (50, h // 2), (0, h - 8)]:
+                cv.create_line(30, y, w - 5, y, fill="#eee", tags="grid")
+                cv.create_text(15, y, text=str(val), font=("Consolas", 8), fill="#888", tags="grid")
+            self._grid_drawn = True
         t0 = self.history[0][0]
         t1 = self.history[-1][0]
         span = max(t1 - t0, 1)
@@ -769,7 +792,7 @@ class BenchApp:
                     continue
                 pts.append(xy(row[0], row[idx], vmax))
             for a, b in zip(pts, pts[1:]):
-                cv.create_line(a, b, fill=color, width=2)
+                cv.create_line(a, b, fill=color, width=2, tags="data")
 
         if self.var_g_cpu.get():
             line(1, "green")       # CPU load %
