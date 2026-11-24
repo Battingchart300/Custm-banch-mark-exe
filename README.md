@@ -1,4 +1,4 @@
-# PTS Benchmark v0.1
+# PTS Benchmark v0.2
 
 Benchmark app pre Windows 10 / 11 — CPU + RAM + Disk + GPU + Stress test v jednom .exe.
 
@@ -49,7 +49,7 @@ Veľkosť exe: cca 10–15 MB.
 ## Kontrola aktualizácií (nové v 0.1)
 
 - Appka pri štarte sama skontroluje GitHub Releases, či je novšia verzia.
-- Hore v okne vždy vidíš: `Verzia: v0.1 | Máš najnovšiu verziu` alebo `Nová verzia v0.2 je dostupná!`
+- Hore v okne vždy vidíš: `Verzia: v0.2 | Máš najnovšiu verziu` alebo `Nová verzia v0.2 je dostupná!`
 - Tlačidlo **Skontrolovať aktualizácie** skontroluje ručne.
 - Ak je nová verzia, appka sa len opýta, či chceš otvoriť stránku na stiahnutie — nič sama nesťahuje ani neinštaluje.
 - Nemusíš v kuse sťahovať a mazať: starý exe prepíšeš novým, až keď nová verzia naozaj vyjde.
@@ -62,3 +62,14 @@ Veľkosť exe: cca 10–15 MB.
 - **História:** každý celý test sa uloží do `pts_history.json` (max 20 záznamov)
 - V appke vidíš najlepšie skóre, počet testov a posledné 3 behy — porovnáš, či PC po zmene ide lepšie alebo horšie
 - Výsledok sa dá uložiť aj do .json cez tlačidlo Uložiť
+
+## Stop všetko + žiadny test pri štarte (nové v 0.2)
+
+- Tlačidlo **■ Stop všetko** zastaví CPU, RAM, Disk, GPU aj Stress test — do pár sekúnd, pri najbližšej kontrole.
+- Pri štarte appky sa nespúšťa žiadny test. Testy štartujú len tlačidlom. Monitor (graf) len číta hodnoty, netestuje.
+
+## Graf pre všetko (nové v 0.2)
+
+- Jeden živý graf, každé 2 s: CPU % (zelená), RAM % (modrá), Disk obsadený % (fialová), GPU zaťaženie / teplota (oranžová), teplota CPU °C (červená)
+- Pod grafom sú zaškrtávacie políčka Graf: CPU / RAM / Disk / GPU / Teplota — čo nechceš vidieť, odškrtni
+- Aktuálne čísla aj ako text pod grafom: CPU %, RAM %, Disk obsadený %, teplota CPU, GPU

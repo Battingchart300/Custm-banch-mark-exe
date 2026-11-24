@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-PTS Benchmark v0.1 - Windows 10/11
-CPU + RAM + Disk + GPU + Stress test (az 4 h, vlastny cas) + graf teploty / zatazenia + kontrola aktualizacii
+PTS Benchmark v0.2 - Windows 10/11
+CPU + RAM + Disk + GPU + Stress test (az 4 h, vlastny cas) + graf + kontrola aktualizacii + Stop vsetko
+Pri starte sa nespusta ziadny test.
 Python 3.10+ / Tkinter / len standardna kniznica (psutil volitelny)
 Build: PyInstaller --onefile --noconsole main.py
 Autor: BattingChart300 / PTS Corporation
@@ -24,7 +25,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "PTS Benchmark"
-VERSION = "0.1"
+VERSION = "0.2"
 REPO = "Battingchart300/Custm-banch-mark-exe"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 CPU_DURATION = 3.0
@@ -66,6 +67,9 @@ def parse_duration(text):
 
 
 HISTORY_FILE = "pts_history.json"
+# Stop vsetko: nastavi sa tlacidlom Stop vsetko, vycisti sa pri starte noveho testu.
+# Pri starte appky je prazdny a nespusta sa ziadny test.
+STOP_ALL = threading.Event()
 
 
 def compute_scores(results):
@@ -222,6 +226,14 @@ def get_gpu_info():
     return name, vram, extra
 
 
+def get_disk_used_pct():
+    try:
+        total, used, free = shutil.disk_usage(os.getcwd())
+        return round(used / total * 100, 1) if total else None
+    except Exception:
+        return None
+
+
 def get_disk_info():
     try:
         total, used, free = shutil.disk_usage(os.getcwd())
@@ -318,6 +330,8 @@ def _cpu_worker(duration):
     end = time.perf_counter() + duration
     x = 1.0
     while time.perf_counter() < end:
+        if STOP_ALL.is_set():
+            break
         for _ in range(2000):
             x = math.sqrt(x + 1.7) + math.sin(x) * 0.5
             ops += 1
@@ -331,6 +345,10 @@ def cpu_test(duration=CPU_DURATION):
     ops1 = _cpu_worker(duration)
     single = ops1 / duration
     cores = os.cpu_count() or 1
+    if STOP_ALL.is_set():
+        return {"single_kops": round(single / 1000, 1),
+                "multi_kops": 0, "cores": cores,
+                "time_s": round(time.perf_counter() - t0, 1), "stopped": True}
     try:
         with multiprocessing.Pool(processes=cores) as pool:
             results = pool.map(_cpu_worker, [duration] * cores)
@@ -352,13 +370,15 @@ def ram_test(size_mb=RAM_SIZE_MB, duration=3.0):
     copies = 0
     end = t0 + duration
     while time.perf_counter() < end:
+        if STOP_ALL.is_set():
+            break
         dst = bytearray(data)
         copies += 1
         del dst
     elapsed = time.perf_counter() - t0
-    return {"mb_s": round((copies * size_mb) / elapsed, 1),
+    return {"mb_s": round((copies * size_mb) / elapsed, 1) if elapsed > 0 else 0,
             "size_mb": size_mb, "copies": copies,
-            "time_s": round(elapsed, 1)}
+            "time_s": round(elapsed, 1), "stopped": STOP_ALL.is_set()}
 
 
 def disk_test(size_mb=DISK_SIZE_MB):
@@ -369,6 +389,8 @@ def disk_test(size_mb=DISK_SIZE_MB):
         t0 = time.perf_counter()
         with open(path, "wb") as f:
             for _ in range(size_mb):
+                if STOP_ALL.is_set():
+                    break
                 f.write(chunk)
             f.flush()
             os.fsync(f.fileno())
@@ -376,7 +398,8 @@ def disk_test(size_mb=DISK_SIZE_MB):
         t0 = time.perf_counter()
         with open(path, "rb") as f:
             while f.read(1024 * 1024):
-                pass
+                if STOP_ALL.is_set():
+                    break
         read_s = time.perf_counter() - t0
         return {"write_mb_s": round(size_mb / write_s, 1),
                 "read_mb_s": round(size_mb / read_s, 1),
@@ -407,6 +430,12 @@ class BenchApp:
         self.monitor_start = time.time()
         self.gpu_win = None
         self.gpu_cv = None
+        # Graf: co sa ma kreslit (vsetko zapnute)
+        self.var_g_cpu = tk.BooleanVar(value=True)
+        self.var_g_ram = tk.BooleanVar(value=True)
+        self.var_g_disk = tk.BooleanVar(value=True)
+        self.var_g_gpu = tk.BooleanVar(value=True)
+        self.var_g_temp = tk.BooleanVar(value=True)
 
         style = ttk.Style()
         try:
@@ -417,7 +446,7 @@ class BenchApp:
         top = tk.Frame(root, padx=12, pady=8)
         top.pack(fill="x")
         tk.Label(top, text=APP_NAME, font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.1",
+        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.2",
                  font=("Segoe UI", 10), fg="#666").pack(anchor="w")
         upd = tk.Frame(top)
         upd.pack(fill="x", pady=2)
@@ -448,6 +477,9 @@ class BenchApp:
                       font=("Segoe UI", 10)).pack(side="left", padx=3)
         tk.Button(btns, text="Uložiť", command=self.save,
                   width=8).pack(side="right", padx=3)
+        tk.Button(btns, text="■ Stop všetko", command=self.stop_all,
+                  bg="#7c2d12", fg="white", font=("Segoe UI", 10, "bold"),
+                  width=12).pack(side="right", padx=3)
         # Dlzka rychleho testu - vlastny cas v sekundach
         tk.Label(btns, text="Test (s):", font=("Segoe UI", 9)).pack(side="right", padx=2)
         self.quick_dur = tk.Spinbox(btns, from_=1, to=10, width=3,
@@ -493,8 +525,16 @@ class BenchApp:
         self.live_label = tk.Label(gf, text="CPU: —  |  Teplota CPU: —  |  GPU: —",
                                    font=("Consolas", 9), fg="#333")
         self.live_label.pack(anchor="w")
-        tk.Label(gf, text="zelená = zaťaženie CPU %   •   červená = teplota CPU °C   •   oranžová = teplota GPU °C   •   ak teplota nejde zistiť, graf ukazuje len zaťaženie",
+        tk.Label(gf, text="zelená = CPU %  •  modrá = RAM %  •  fialová = Disk obsadený %  •  oranžová = GPU teplota / zaťaženie  •  červená = teplota CPU °C",
                  font=("Segoe UI", 8), fg="#666").pack(anchor="w")
+        tog = tk.Frame(gf)
+        tog.pack(anchor="w")
+        tk.Label(tog, text="Graf:", font=("Segoe UI", 9)).pack(side="left")
+        for txt, var in [("CPU", self.var_g_cpu), ("RAM", self.var_g_ram),
+                         ("Disk", self.var_g_disk), ("GPU", self.var_g_gpu),
+                         ("Teplota", self.var_g_temp)]:
+            tk.Checkbutton(tog, text=txt, variable=var,
+                           command=self.draw_graph).pack(side="left")
 
         # --- Skore ako Novabench + historia ---
         scf = tk.LabelFrame(root, text=" Skóre (ako Novabench) + história ", padx=8, pady=4)
@@ -520,7 +560,9 @@ class BenchApp:
         self.out = tk.Text(out, font=("Consolas", 10), bg="#111",
                            fg="#0f0", insertbackground="white", height=8)
         self.out.pack(fill="both", expand=True)
-        self.log("PTS Benchmark v0.1 - pripraveny.\n"
+        self.log("PTS Benchmark v0.2 - pripraveny.\n"
+                 "Pri starte sa nespusta ziadny test - testy startuju len tlacidlom.\n"
+                 "Stop vsetko zastavi CPU / RAM / Disk / GPU aj Stress test.\n"
                  "GPU test = 2D render test (nie 3DMark).\n"
                  "Stress: pri 90 °C+ zastav test, pri 95 °C sa zastavi sam.\n")
         # Monitor loop - bezi stale, aj bez stressu
@@ -553,14 +595,24 @@ class BenchApp:
             cpu_temp = get_cpu_temp()
             gpu = get_gpu_stats()
             gpu_temp = gpu["temp"] if gpu else None
+            gpu_load = gpu["load"] if gpu else None
+            ram_load = get_ram_load()
+            if ram_load is None:
+                ram_load = 100.0 if self.stress_running and self.var_ram.get() else 0.0
+            disk_pct = get_disk_used_pct()
             elapsed = time.time() - self.monitor_start
-            self.history.append((elapsed, cpu_load, cpu_temp, gpu_temp))
+            # (cas, cpu%, cpu_temp, gpu_temp, ram%, gpu%, disk_used%)
+            self.history.append((elapsed, cpu_load, cpu_temp, gpu_temp,
+                                 ram_load, gpu_load, disk_pct))
             if len(self.history) > 300:  # max 10 min v grafe
                 self.history.pop(0)
             gpu_txt = f"{gpu_temp:.0f} °C / {gpu['load']:.0f}%" if gpu else "—"
             temp_txt = f"{cpu_temp:.1f} °C" if cpu_temp is not None else "nedá sa zistiť"
+            ram_txt = f"{ram_load:.0f}%" if ram_load is not None else "—"
+            disk_txt = f"{disk_pct:.0f}%" if disk_pct is not None else "—"
             self.live_label.config(
-                text=f"CPU: {cpu_load:.0f}%  |  Teplota CPU: {temp_txt}  |  GPU: {gpu_txt}")
+                text=f"CPU: {cpu_load:.0f}%  |  RAM: {ram_txt}  |  Disk obsadený: {disk_txt}  |  "
+                     f"Teplota CPU: {temp_txt}  |  GPU: {gpu_txt}")
             self.draw_graph()
             # Bezpecnost: auto-stop pri 95 °C
             if self.stress_running and cpu_temp is not None and cpu_temp >= 95:
@@ -602,12 +654,21 @@ class BenchApp:
             for a, b in zip(pts, pts[1:]):
                 cv.create_line(a, b, fill=color, width=2)
 
-        line(1, "green")       # CPU load %
-        line(2, "red")         # CPU temp °C (0-100)
-        line(3, "orange")      # GPU temp °C
+        if self.var_g_cpu.get():
+            line(1, "green")       # CPU load %
+        if self.var_g_temp.get():
+            line(2, "red")         # CPU temp °C (0-100)
+        if self.var_g_gpu.get():
+            line(3, "orange")      # GPU temp °C
+            line(5, "#ff8c00", vmax=100.0)  # GPU load % (oranzova ciarkovana)
+        if self.var_g_ram.get():
+            line(4, "blue")        # RAM load %
+        if self.var_g_disk.get():
+            line(6, "purple")      # Disk obsadeny %
 
     # ----- Rychle testy -----
     def _run_thread(self, fn, label):
+        STOP_ALL.clear()
         if self.running or self.stress_running:
             messagebox.showwarning("Beží test", "Počkaj, kým dobehne aktuálny test.")
             return
@@ -698,6 +759,8 @@ class BenchApp:
                 cv.create_oval(x, y, x + 25, y + 25, fill=c, outline="")
             win.update()
             frames += 1
+            if STOP_ALL.is_set():
+                break
         win.destroy()
         fps = round(frames / 3.0, 1)
         self.results["gpu"] = {"fps": fps, "gpu": gpu, "vram_gb": vram}
@@ -706,6 +769,7 @@ class BenchApp:
 
     # ----- Stress test -----
     def start_stress(self):
+        STOP_ALL.clear()
         if self.stress_running or self.running:
             messagebox.showwarning("Beží test", "Počkaj, kým dobehne aktuálny test.")
             return
@@ -764,7 +828,7 @@ class BenchApp:
     def stress_worker(self):
         cores = os.cpu_count() or 1
         cycles = 0
-        while self.stress_running:
+        while self.stress_running and not STOP_ALL.is_set():
             if self.stress_duration and (time.time() - self.stress_start) >= self.stress_duration:
                 break
             try:
@@ -856,6 +920,31 @@ class BenchApp:
                        f"(CPU {h.get('scores', {}).get('cpu')} / RAM {h.get('scores', {}).get('ram')} / "
                        f"Disk {h.get('scores', {}).get('disk')} / GPU {h.get('scores', {}).get('gpu')})\n")
         self.history_text.config(state="disabled")
+
+    # ----- Stop vsetko -----
+    def stop_all(self):
+        STOP_ALL.set()
+        was_running = self.running or self.stress_running
+        self.stress_running = False
+        if self.gpu_win is not None:
+            try:
+                self.gpu_win.destroy()
+            except Exception:
+                pass
+            self.gpu_win = None
+            self.gpu_cv = None
+        self.btn_stress.config(state="normal")
+        self.btn_stop.config(state="disabled")
+        try:
+            self.progress.stop()
+        except Exception:
+            pass
+        if was_running:
+            self.log("\n■ STOP VŠETKO — všetky úlohy zastavené.\n")
+            self.set_status("Zastavené.")
+        else:
+            self.log("Stop všetko: žiadny test nebeží.\n")
+            self.set_status("Pripravený — žiadny test nebeží.")
 
     # ----- Aktualizacie -----
     def check_updates_manual(self):
