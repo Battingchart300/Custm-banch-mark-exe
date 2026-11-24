@@ -25,9 +25,9 @@ jobs:
         with:
           name: PTS-Benchmark-windows
           path: dist/PTS-Benchmark.exe
-      - name: Create Release v1.2.0
+      - name: Create Release v0.1
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.2.0 dist/PTS-Benchmark.exe --title "PTS Benchmark v1.2.0" --notes "Windows 10/11 exe - CPU + RAM + Disk + GPU + Stress test az 4 h + graf teploty / zatazenia" || gh release upload v1.2.0 dist/PTS-Benchmark.exe --clobber
+          gh release create v0.1 dist/PTS-Benchmark.exe --title "PTS Benchmark v0.1" --notes "Windows 10/11 exe - CPU + RAM + Disk + GPU + Stress test az 4 h (vlastny cas) + graf teploty / zatazenia + kontrola aktualizacii" || gh release upload v0.1 dist/PTS-Benchmark.exe --clobber
