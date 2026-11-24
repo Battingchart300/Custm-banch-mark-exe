@@ -16,18 +16,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
       - name: Install PyInstaller
         run: pip install pyinstaller psutil
+      - name: Build C# hardware info exe
+        run: dotnet build csharp/PtsHardwareInfo.csproj -c Release
       - name: Build exe
-        run: pyinstaller --onefile --noconsole --name PTS-Benchmark main.py
+        run: pyinstaller --onefile --noconsole --name PTS-Benchmark --version-file version_info.txt --add-binary "csharp/bin/Release/net8.0-windows/PtsHardwareInfo.exe;." main.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PTS-Benchmark-windows
-          path: dist/PTS-Benchmark.exe
-      - name: Create Release v0.4
+          path: |
+            dist/PTS-Benchmark.exe
+            csharp/bin/Release/net8.0-windows/PtsHardwareInfo.exe
+      - name: Create Release v0.5
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.4 dist/PTS-Benchmark.exe --title "PTS Benchmark v0.4" --notes "Windows 10/11 exe - CPU + RAM + Disk + GPU + Stress test az 4 h (vlastny cas) + graf teploty / zatazenia + kontrola aktualizacii" || gh release upload v0.4 dist/PTS-Benchmark.exe --clobber
+          gh release create v0.5 dist/PTS-Benchmark.exe csharp/bin/Release/net8.0-windows/PtsHardwareInfo.exe --title "PTS Benchmark v0.5" --notes "Windows 10/11 exe - CPU + RAM + Disk + GPU + Stress test az 4 h (vlastny cas) + graf teploty / zatazenia + kontrola aktualizacii + C# hardware info vnutri" || gh release upload v0.5 dist/PTS-Benchmark.exe csharp/bin/Release/net8.0-windows/PtsHardwareInfo.exe --clobber
