@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PtsHardwareInfo</AssemblyName>
+    <RootNamespace>PtsHardwareInfo</RootNamespace>
+    <Company>BattingChart300</Company>
+    <Product>PTS Benchmark - Hardware Info</Product>
+    <Version>0.4.0</Version>
+    <!-- Windows only: WMI (System.Management) a PerformanceCounter -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

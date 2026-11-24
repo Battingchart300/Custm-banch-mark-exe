@@ -112,3 +112,16 @@ Veľkosť exe: cca 10–15 MB.
 
 - Všetky pomocné príkazy (wmic, PowerShell, nvidia-smi) bežia na pozadí bez otvárania konzoly — `run_cmd()` používa na Windows `CREATE_NO_WINDOW` + skryté `STARTUPINFO`. Predtým každé volanie (každé 2 s) blikalo čiernym oknom.
 - Samotný exe sa buildí s `--noconsole`, takže ani appka sama neotvára konzolu. Updater `.bat` sa tiež spúšťa s `CREATE_NO_WINDOW`.
+
+## Teplota CPU (vylepšené v 0.4)
+
+- Poradie zisťovania: psutil senzory → Linux /sys/class/thermal → Libre/OpenHardwareMonitor (PowerShell aj wmic) → WMI ThermalZone → Win32_PerfFormattedData ThermalZoneInformation.
+- Úprimne: Windows teplotu CPU štandardne vôbec neposkytuje. Ak PC teplotu nedá, appka napíše "nedá sa zistiť" a tlačidlo "Teplota CPU sa nedá zistiť? Klikni sem" poradí: stiahnuť LibreHardwareMonitor portable zadarmo, nechať ho bežať na pozadí, reštartovať appku — potom sa teplota objaví.
+
+## C# hardware info priamo v exe (nové v 0.5)
+
+- Zdroj je v `csharp/` (HardwareInfo.cs + Program.cs) — aj v repozitári.
+- GitHub Actions najprv zbuildí `PtsHardwareInfo.exe` cez `dotnet build` a potom ho PyInstaller zabalí **priamo do `PTS-Benchmark.exe`** (`--add-binary`).
+- Python appka ho pri štarte použije na info o hardvéri (`--json`): CPU, RAM, GPU, disk, teplota. Ak helper chýba alebo na PC nie je .NET 8 runtime, appka funguje ďalej po starom cez Python detekciu — nič sa nepokazí.
+- `PtsHardwareInfo.exe` je aj samostatne v Releases ako druhý súbor na stiahnutie.
+- Poznámka: C# helper potrebuje .NET 8 runtime na PC. Bez neho sa nespustí a Python použije vlastnú detekciu.

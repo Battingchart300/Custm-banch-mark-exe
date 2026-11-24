@@ -25,7 +25,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "PTS Benchmark"
-VERSION = "0.4"
+VERSION = "0.5"
 REPO = "Battingchart300/Custm-banch-mark-exe"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 CPU_DURATION = 3.0
@@ -277,6 +277,46 @@ def get_disk_used_pct():
         return None
 
 
+def cs_hardware_info():
+    """C# helper PtsHardwareInfo.exe (zabudovany v exe cez PyInstaller
+    --add-binary, alebo vedla exe). Vrati dict z --json, alebo None.
+    Pouziva sa len na jednorazove info o hardveri, nie na zivy monitor
+    (spustenie .NET exe kazde 2 s by bolo pomale). Ak helper chyba,
+    vsetko funguje dalej po starom cez Python detekciu."""
+    try:
+        candidates = []
+        # PyInstaller onefile: subory su v docasnom _MEIPASS
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(os.path.join(meipass, "PtsHardwareInfo.exe"))
+        if getattr(sys, "frozen", False):
+            candidates.append(os.path.join(
+                os.path.dirname(os.path.abspath(sys.executable)),
+                "PtsHardwareInfo.exe"))
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "PtsHardwareInfo.exe"))
+        candidates.append(os.path.join(os.getcwd(), "PtsHardwareInfo.exe"))
+        exe_path = None
+        for c in candidates:
+            if os.path.isfile(c):
+                exe_path = c
+                break
+        if exe_path is None:
+            return None
+        out = run_cmd([exe_path, "--json"])
+        if not out:
+            return None
+        # --json vypise len JSON, ale pre istotu vezmi od prvej { po poslednu }
+        start = out.find("{")
+        end = out.rfind("}")
+        if start < 0 or end < 0:
+            return None
+        data = json.loads(out[start:end + 1])
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
 def get_disk_info():
     try:
         total, used, free = shutil.disk_usage(os.getcwd())
@@ -418,9 +458,12 @@ def get_ram_load():
 
 def get_cpu_temp():
     """Teplota CPU v °C, alebo None ak sa neda zistit.
-    Windows: WMI MSAcpi_ThermalZoneTemperature (nie kazdy PC to ma).
-    Linux + psutil: sensors_temperatures().
-    NVIDIA GPU teplota ide cez nvidia-smi - vid get_gpu_stats()."""
+    Poradie: psutil senzory -> Linux /sys/class/thermal -> Windows:
+    Libre/OpenHardwareMonitor (CimInstance aj wmic) -> WMI ThermalZone
+    -> Win32_PerfFormattedData ThermalZoneInformation.
+    Pravda: Windows teplotu CPU standardne vobec neposkytuje - vacsina PC ju
+    neda bez LibreHardwareMonitor. Ak vrati None, appka to napise a poradi,
+    co nainstalovat (vid show_cpu_temp_help)."""
     try:
         if HAS_PSUTIL:
             temps = psutil.sensors_temperatures()
@@ -432,8 +475,24 @@ def get_cpu_temp():
                     return float(vals[0].current)
     except Exception:
         pass
+    # Linux: /sys/class/thermal (funguje aj bez psutil)
+    if sys.platform != "win32":
+        try:
+            import glob
+            for path in sorted(glob.glob("/sys/class/thermal/thermal_zone*/temp")):
+                try:
+                    with open(path) as f:
+                        v = int(f.read().strip())
+                    if v > 1000:  # milistupne
+                        v = v / 1000.0
+                    if 0 < v < 130:
+                        return round(float(v), 1)
+                except Exception:
+                    continue
+        except Exception:
+            pass
     if sys.platform == "win32":
-        # 1) OpenHardwareMonitor / LibreHardwareMonitor (ak je nainstalovany)
+        # 1) OpenHardwareMonitor / LibreHardwareMonitor cez PowerShell
         for ns in ("root\\OpenHardwareMonitor", "root\\LibreHardwareMonitor"):
             out = run_cmd(["powershell", "-NoProfile", "-Command",
                            f"Get-CimInstance -Namespace {ns} -ClassName Sensor "
@@ -446,6 +505,22 @@ def get_cpu_temp():
                         return round(v, 1)
             except Exception:
                 pass
+            # 1b) to iste cez wmic (starsi, ale niekde funguje lepsie)
+            out = run_cmd(["wmic", f"/namespace:\\\\{ns}", "PATH", "Sensor",
+                           "where", "SensorType='Temperature'",
+                           "get", "Name,Value"])
+            try:
+                for line in out.splitlines():
+                    if "CPU" in line.upper():
+                        for part in line.split():
+                            try:
+                                v = float(part)
+                                if 0 < v < 130:
+                                    return round(v, 1)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
         # 2) WMI MSAcpi_ThermalZoneTemperature (nie kazdy PC to ma)
         out = run_cmd(["wmic", "/namespace:\\\\root\\wmi", "PATH",
                        "MSAcpi_ThermalZoneTemperature", "get", "CurrentTemperature"])
@@ -453,7 +528,20 @@ def get_cpu_temp():
             line = line.strip()
             if line.isdigit():
                 # WMI vracia desatiny Kelvina
-                return round(int(line) / 10.0 - 273.15, 1)
+                v = round(int(line) / 10.0 - 273.15, 1)
+                if 0 < v < 130:
+                    return v
+        # 3) Win32_PerfFormattedData ThermalZoneInformation
+        out = run_cmd(["powershell", "-NoProfile", "-Command",
+                       "Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation "
+                       "| Select-Object -First 1 -ExpandProperty Temperature"])
+        try:
+            if out:
+                v = float(out.splitlines()[0].strip())
+                if 0 < v < 130:
+                    return round(v, 1)
+        except Exception:
+            pass
     return None
 
 
@@ -603,7 +691,7 @@ class BenchApp:
         top = tk.Frame(root, padx=12, pady=8)
         top.pack(fill="x")
         tk.Label(top, text=APP_NAME, font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.4",
+        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.5",
                  font=("Segoe UI", 10), fg="#666").pack(anchor="w")
         upd = tk.Frame(top)
         upd.pack(fill="x", pady=2)
@@ -690,8 +778,11 @@ class BenchApp:
         self.temp_label = tk.Label(tf, text="CPU: — °C / — %   |   GPU: — °C / — %   |   RAM: — %",
                                    font=("Segoe UI", 11, "bold"))
         self.temp_label.pack(anchor="w")
-        tk.Label(tf, text="Teplota CPU ide cez psutil / OpenHardwareMonitor / WMI — ak PC teplotu nedá, ukáže len zaťaženie. GPU teplota ide na NVIDIA cez nvidia-smi.",
+        tk.Label(tf, text="Teplota CPU ide cez psutil / LibreHardwareMonitor / WMI — ak PC teplotu nedá, ukáže len zaťaženie. GPU teplota ide na NVIDIA cez nvidia-smi.",
                  font=("Segoe UI", 8), fg="#666").pack(anchor="w")
+        tk.Button(tf, text="Teplota CPU sa nedá zistiť? Klikni sem",
+                  command=self.show_cpu_temp_help,
+                  font=("Segoe UI", 9)).pack(anchor="w", pady=2)
 
         # --- Graf ---
         gf = tk.LabelFrame(root, text=" Graf — teplota a zaťaženie (živý, každé 2 s) ", padx=8, pady=4)
@@ -749,8 +840,14 @@ class BenchApp:
 
     def show_info(self):
         self.info_text.delete("1.0", "end")
-        for k, v in system_info().items():
-            self.info_text.insert("end", f"{k}: {v}\n")
+        cs = cs_hardware_info()
+        if cs:
+            self.info_text.insert("end", "Info o hardveri (C# helper):\n")
+            for k, v in cs.items():
+                self.info_text.insert("end", f"{k}: {v}\n")
+        else:
+            for k, v in system_info().items():
+                self.info_text.insert("end", f"{k}: {v}\n")
         self.info_text.config(state="disabled")
 
     def log(self, s):
@@ -1163,6 +1260,17 @@ class BenchApp:
         else:
             self.log("Stop všetko: žiadny test nebeží.\n")
             self.set_status("Pripravený — žiadny test nebeží.")
+
+    # ----- Teplota CPU - pomoc -----
+    def show_cpu_temp_help(self):
+        if messagebox.askyesno("Teplota CPU",
+                "Windows teplotu CPU štandardne vôbec neposkytuje — väčšina PC ju\n"
+                "nedá zistiť bez pomocného programu. Najlepšia cesta zadarmo:\n\n"
+                "1) Stiahni LibreHardwareMonitor (portable, zadarmo)\n"
+                "2) Spusti ho (netreba inštalovať) a nechaj ho bežať na pozadí\n"
+                "3) Reštartuj PTS Benchmark — teplota CPU sa objaví\n\n"
+                "Chceš otvoriť stránku na stiahnutie LibreHardwareMonitor?"):
+            webbrowser.open("https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases")
 
     # ----- Aktualizacie -----
     def check_updates_manual(self):
