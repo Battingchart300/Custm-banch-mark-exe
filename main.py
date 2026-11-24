@@ -861,24 +861,38 @@ class BenchApp:
         self.log(f"  GPU: {gpu} ({vram} GB)\n")
         win = tk.Toplevel(self.root)
         win.title("GPU test")
+        # Okno ostane tam, kde je: pevna velkost, nie je topmost,
+        # nevola sa focus ani lift, takze neskace dopredu/dozadu.
         win.geometry("640x380")
+        win.resizable(False, False)
+        try:
+            win.attributes("-topmost", False)
+        except Exception:
+            pass
+        win.protocol("WM_DELETE_WINDOW", lambda: STOP_ALL.set())
         cv = tk.Canvas(win, width=640, height=360, bg="black")
         cv.pack()
         colors = ["red", "green", "blue", "yellow", "cyan", "magenta", "white"]
         frames = 0
         end = time.perf_counter() + 3.0
         while time.perf_counter() < end:
+            if not win.winfo_exists():
+                break
             cv.delete("all")
             for _ in range(60):
                 x, y = random.randint(0, 600), random.randint(0, 320)
                 c = random.choice(colors)
                 cv.create_rectangle(x, y, x + 40, y + 40, fill=c, outline="")
                 cv.create_oval(x, y, x + 25, y + 25, fill=c, outline="")
-            win.update()
+            # len prekreslenie, nie win.update() - to by okno stale vyhadzovalo dopredu
+            win.update_idletasks()
             frames += 1
             if STOP_ALL.is_set():
                 break
-        win.destroy()
+        try:
+            win.destroy()
+        except Exception:
+            pass
         fps = round(frames / 3.0, 1)
         self.results["gpu"] = {"fps": fps, "gpu": gpu, "vram_gb": vram}
         self.log(f"  FPS (2D, 60 objektov/frame): {fps}\n"
@@ -921,7 +935,14 @@ class BenchApp:
     def open_gpu_stress_window(self):
         self.gpu_win = tk.Toplevel(self.root)
         self.gpu_win.title("GPU stress")
+        # Rovnako ako GPU test: pevna velkost, nie topmost, neskace dopredu/dozadu.
         self.gpu_win.geometry("640x380")
+        self.gpu_win.resizable(False, False)
+        try:
+            self.gpu_win.attributes("-topmost", False)
+        except Exception:
+            pass
+        self.gpu_win.protocol("WM_DELETE_WINDOW", self.stop_all)
         self.gpu_cv = tk.Canvas(self.gpu_win, width=640, height=360, bg="black")
         self.gpu_cv.pack()
         self.gpu_stress_frame()

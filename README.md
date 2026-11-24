@@ -82,3 +82,8 @@ Veľkosť exe: cca 10–15 MB.
 - Teplota CPU: psutil → OpenHardwareMonitor / LibreHardwareMonitor (ak je nainštalovaný) → WMI
 - Teplota + zaťaženie GPU: NVIDIA cez `nvidia-smi`
 - Ak PC teplotu nedá zistiť, appka ukáže len zaťaženie a napíše "nedá sa zistiť" — nie je to chyba appky
+
+## GPU okno (vylepšené v 0.2)
+
+- GPU test okno aj GPU stress okno majú pevnú veľkosť, nie sú topmost a nevolá sa focus ani lift — okno zostane tam, kde je, a neskáče dopredu/dozadu.
+- Zatvorenie GPU okna krížikom zastaví test (Stop všetko).
