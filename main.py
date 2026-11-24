@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-PTS Benchmark v1.2.0 - Windows 10/11
-CPU + RAM + Disk + GPU + Stress test (az 4 h) + graf teploty / zatazenia
+PTS Benchmark v0.1 - Windows 10/11
+CPU + RAM + Disk + GPU + Stress test (az 4 h, vlastny cas) + graf teploty / zatazenia + kontrola aktualizacii
 Python 3.10+ / Tkinter / len standardna kniznica (psutil volitelny)
 Build: PyInstaller --onefile --noconsole main.py
 Autor: BattingChart300 / PTS Corporation
@@ -19,10 +19,14 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+import urllib.request
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "PTS Benchmark"
-VERSION = "1.2.0"
+VERSION = "0.1"
+REPO = "Battingchart300/Custm-banch-mark-exe"
+RELEASES_URL = f"https://github.com/{REPO}/releases"
 CPU_DURATION = 3.0
 RAM_SIZE_MB = 64
 DISK_SIZE_MB = 100
@@ -34,6 +38,99 @@ STRESS_DURATIONS = {
     "4 hod": 4 * 60 * 60,
     "Do zastavenia": 0,
 }
+
+def parse_duration(text):
+    """Vlastny cas testovania: '45', '45 min', '90 min', '1 hod', '2.5 hod',
+    '3h', 'Do zastavenia'. Vrati sekundy (0 = do zastavenia) alebo None."""
+    if text is None:
+        return None
+    t = str(text).strip().lower()
+    if t in ("", "do zastavenia", "nekonecno", "0"):
+        return 0
+    if t in STRESS_DURATIONS:
+        return STRESS_DURATIONS[t]
+    # cislo + volitelna jednotka
+    import re
+    m = re.match(r"^(\d+(?:[.,]\d+)?)\s*(min|m|hod|h|hodin|hodiny)?$", t)
+    if not m:
+        return None
+    val = float(m.group(1).replace(",", "."))
+    unit = m.group(2) or "min"
+    if unit in ("hod", "h", "hodin", "hodiny"):
+        secs = int(val * 3600)
+    else:
+        secs = int(val * 60)
+    if secs < 60 or secs > 8 * 3600:
+        return None  # 1 min - 8 hod
+    return secs
+
+
+HISTORY_FILE = "pts_history.json"
+
+
+def compute_scores(results):
+    """Novabench-style skore: kazdy test 0-1000, celkom 0-1000 (vazene)."""
+    try:
+        cpu = results.get("cpu", {}).get("multi_kops", 0)
+        ram = results.get("ram", {}).get("mb_s", 0)
+        d = results.get("disk", {})
+        disk = ((d.get("write_mb_s", 0) + d.get("read_mb_s", 0)) / 2) if d else 0
+        gpu = results.get("gpu", {}).get("fps", 0)
+        cpu_s = min(1000, int(cpu / 10))
+        ram_s = min(1000, int(ram / 20))
+        disk_s = min(1000, int(disk / 2))
+        gpu_s = min(1000, int(gpu * 10))
+        total = int(cpu_s * 0.4 + ram_s * 0.2 + disk_s * 0.2 + gpu_s * 0.2)
+        return {"cpu": cpu_s, "ram": ram_s, "disk": disk_s, "gpu": gpu_s, "total": total}
+    except Exception:
+        return {"cpu": 0, "ram": 0, "disk": 0, "gpu": 0, "total": 0}
+
+
+def load_history():
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_history_entry(entry):
+    try:
+        hist = load_history()
+        hist.append(entry)
+        hist = hist[-20:]  # max 20 zaznamov
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(hist, f, indent=2, ensure_ascii=False)
+        return hist
+    except Exception:
+        return load_history()
+
+
+def version_tuple(v):
+    """'v1.2.0' -> (1, 2, 0), '0.1' -> (0, 1). Na porovnanie verzii."""
+    try:
+        parts = str(v).strip().lstrip("vV").split(".")
+        return tuple(int(p) for p in parts if p.isdigit())
+    except Exception:
+        return (0,)
+
+
+def check_latest_version():
+    """Zisti najnovsiu verziu z GitHub Releases. Vrati (verzia, url) alebo (None, None)."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{REPO}/releases/latest",
+            headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.load(r)
+        tag = str(data.get("tag_name", "")).strip()
+        if not tag:
+            return None, None
+        return tag.lstrip("vV"), data.get("html_url") or RELEASES_URL
+    except Exception:
+        return None, None
+
 
 # psutil je volitelny - ak je, mame presne % CPU / RAM / teplotu na Linuxe
 try:
@@ -245,7 +342,7 @@ def cpu_test(duration=CPU_DURATION):
             "cores": cores, "time_s": round(time.perf_counter() - t0, 1)}
 
 
-def ram_test(size_mb=RAM_SIZE_MB):
+def ram_test(size_mb=RAM_SIZE_MB, duration=3.0):
     size = size_mb * 1024 * 1024
     src = bytearray(os.urandom(1024 * 1024))
     data = bytearray()
@@ -253,7 +350,7 @@ def ram_test(size_mb=RAM_SIZE_MB):
         data += src[:min(len(src), size - len(data))]
     t0 = time.perf_counter()
     copies = 0
-    end = t0 + 3.0
+    end = t0 + duration
     while time.perf_counter() < end:
         dst = bytearray(data)
         copies += 1
@@ -297,7 +394,7 @@ class BenchApp:
     def __init__(self, root):
         self.root = root
         root.title(f"{APP_NAME} v{VERSION}")
-        root.geometry("740x880")
+        root.geometry("740x980")
         root.resizable(False, False)
         self.results = {}
         self.running = False
@@ -320,8 +417,16 @@ class BenchApp:
         top = tk.Frame(root, padx=12, pady=8)
         top.pack(fill="x")
         tk.Label(top, text=APP_NAME, font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h  |  v1.2.0",
+        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.1",
                  font=("Segoe UI", 10), fg="#666").pack(anchor="w")
+        upd = tk.Frame(top)
+        upd.pack(fill="x", pady=2)
+        self.update_label = tk.Label(upd, text=f"Verzia: v{VERSION}  |  Aktualizácie: kontrolujem...",
+                                     font=("Segoe UI", 9), fg="#333")
+        self.update_label.pack(side="left")
+        tk.Button(upd, text="Skontrolovať aktualizácie",
+                  command=self.check_updates_manual,
+                  font=("Segoe UI", 9)).pack(side="right")
 
         info = tk.Frame(root, padx=12)
         info.pack(fill="x")
@@ -343,13 +448,21 @@ class BenchApp:
                       font=("Segoe UI", 10)).pack(side="left", padx=3)
         tk.Button(btns, text="Uložiť", command=self.save,
                   width=8).pack(side="right", padx=3)
+        # Dlzka rychleho testu - vlastny cas v sekundach
+        tk.Label(btns, text="Test (s):", font=("Segoe UI", 9)).pack(side="right", padx=2)
+        self.quick_dur = tk.Spinbox(btns, from_=1, to=10, width=3,
+                                    font=("Segoe UI", 10))
+        self.quick_dur.delete(0, "end")
+        self.quick_dur.insert(0, "3")
+        self.quick_dur.pack(side="right", padx=2)
 
         # --- Stress test ---
         sf = tk.LabelFrame(root, text=" Stress test — záťaž PC ", padx=10, pady=6)
         sf.pack(fill="x", padx=12, pady=4)
         tk.Label(sf, text="Dĺžka:", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w")
+        # Editable - mozes napisat vlastny cas, napr. 45 min alebo 3 hod
         self.stress_dur = ttk.Combobox(sf, values=list(STRESS_DURATIONS.keys()),
-                                       state="readonly", width=14)
+                                       width=14)
         self.stress_dur.set("1 hod")
         self.stress_dur.grid(row=0, column=1, padx=4)
         self.var_cpu = tk.BooleanVar(value=True)
@@ -369,6 +482,8 @@ class BenchApp:
         self.stress_label = tk.Label(sf, text="Pripravený. Len na vlastnom PC alebo so súhlasom učiteľa.",
                                      font=("Segoe UI", 9), fg="#666")
         self.stress_label.grid(row=1, column=0, columnspan=7, sticky="w", pady=2)
+        tk.Label(sf, text="Vlastný čas: klikni do poľa a napíš napr. 45 min, 90 min alebo 3 hod (1 min – 8 hod).",
+                 font=("Segoe UI", 8), fg="#666").grid(row=2, column=0, columnspan=7, sticky="w")
 
         # --- Graf ---
         gf = tk.LabelFrame(root, text=" Graf — teplota a zaťaženie (živý, každé 2 s) ", padx=8, pady=4)
@@ -381,6 +496,20 @@ class BenchApp:
         tk.Label(gf, text="zelená = zaťaženie CPU %   •   červená = teplota CPU °C   •   oranžová = teplota GPU °C   •   ak teplota nejde zistiť, graf ukazuje len zaťaženie",
                  font=("Segoe UI", 8), fg="#666").pack(anchor="w")
 
+        # --- Skore ako Novabench + historia ---
+        scf = tk.LabelFrame(root, text=" Skóre (ako Novabench) + história ", padx=8, pady=4)
+        scf.pack(fill="x", padx=12, pady=4)
+        self.score_label = tk.Label(scf, text="Celkové skóre: —  (spusti celý test)",
+                                    font=("Segoe UI", 12, "bold"))
+        self.score_label.pack(anchor="w")
+        self.subscore_label = tk.Label(scf, text="CPU: —  |  RAM: —  |  Disk: —  |  GPU: —",
+                                       font=("Consolas", 9))
+        self.subscore_label.pack(anchor="w")
+        self.history_text = tk.Text(scf, height=3, font=("Consolas", 8),
+                                    bg="#f2f2f2", relief="flat")
+        self.history_text.pack(fill="x")
+        self.update_history_display()
+
         self.progress = ttk.Progressbar(root, mode="indeterminate")
         self.progress.pack(fill="x", padx=12)
         self.status = tk.Label(root, text="Pripravený.", font=("Segoe UI", 10), fg="#333")
@@ -391,11 +520,14 @@ class BenchApp:
         self.out = tk.Text(out, font=("Consolas", 10), bg="#111",
                            fg="#0f0", insertbackground="white", height=8)
         self.out.pack(fill="both", expand=True)
-        self.log("PTS Benchmark v1.2.0 - pripraveny.\n"
+        self.log("PTS Benchmark v0.1 - pripraveny.\n"
                  "GPU test = 2D render test (nie 3DMark).\n"
                  "Stress: pri 90 °C+ zastav test, pri 95 °C sa zastavi sam.\n")
         # Monitor loop - bezi stale, aj bez stressu
         self.root.after(2000, self.monitor_tick)
+        # Kontrola aktualizacii pri starte (vo vlakne, aby nezamrzlo GUI)
+        self.root.after(1500, lambda: threading.Thread(
+            target=self.check_updates, args=(False,), daemon=True).start())
 
     def show_info(self):
         self.info_text.delete("1.0", "end")
@@ -497,8 +629,11 @@ class BenchApp:
         def job():
             self.log("\n=== CELÝ TEST ===\n")
             self.do_cpu(); self.do_ram(); self.do_disk(); self.do_gpu()
-            self.log("\n=== KONIEC ===\nCelkove PTS skore: "
-                     f"{self.pts_score()}\n")
+            scores = compute_scores(self.results)
+            self.log("\n=== KONIEC ===\n"
+                     f"Celkove skore (Novabench-style): {scores['total']} / 1000\n"
+                     f"CPU {scores['cpu']} | RAM {scores['ram']} | Disk {scores['disk']} | GPU {scores['gpu']}\n")
+            self.root.after(0, self.update_score_display)
         self._run_thread(job, "Beží celý test (~25 s)")
 
     def run_cpu(self):
@@ -508,16 +643,23 @@ class BenchApp:
     def run_disk(self):
         self._run_thread(self.do_disk, "Disk test")
 
+    def quick_seconds(self):
+        try:
+            v = int(self.quick_dur.get())
+            return max(1, min(10, v))
+        except Exception:
+            return 3
+
     def do_cpu(self):
         self.log("\n[CPU] ...\n")
-        r = cpu_test()
+        r = cpu_test(duration=self.quick_seconds())
         self.results["cpu"] = r
         self.log(f"  Single-core: {r['single_kops']} kops/s\n"
                  f"  Multi-core ({r['cores']} jadier): {r['multi_kops']} kops/s\n")
 
     def do_ram(self):
         self.log("\n[RAM] ...\n")
-        r = ram_test()
+        r = ram_test(duration=self.quick_seconds())
         self.results["ram"] = r
         self.log(f"  Rychlost kopirovania: {r['mb_s']} MB/s "
                  f"({r['size_mb']} MB, {r['copies']}x)\n")
@@ -568,7 +710,12 @@ class BenchApp:
             messagebox.showwarning("Beží test", "Počkaj, kým dobehne aktuálny test.")
             return
         dur_name = self.stress_dur.get()
-        self.stress_duration = STRESS_DURATIONS.get(dur_name, 3600)
+        parsed = parse_duration(dur_name)
+        if parsed is None:
+            messagebox.showwarning("Zlý čas",
+                "Napíš čas ako napr. 45 min, 90 min, 1 hod alebo 3 hod\n(1 min – 8 hod, alebo Do zastavenia).")
+            return
+        self.stress_duration = parsed
         if not any([self.var_cpu.get(), self.var_ram.get(), self.var_gpu.get()]):
             messagebox.showwarning("Nič vybrané", "Zaškrtni aspoň CPU, RAM alebo GPU.")
             return
@@ -678,6 +825,69 @@ class BenchApp:
             self.log("Log: pts_stress_log.txt\n")
         except Exception:
             pass
+
+    # ----- Skore + historia (Novabench) -----
+    def update_score_display(self):
+        scores = compute_scores(self.results)
+        self.results["scores"] = scores
+        self.score_label.config(text=f"Celkové skóre: {scores['total']} / 1000")
+        self.subscore_label.config(
+            text=f"CPU: {scores['cpu']}  |  RAM: {scores['ram']}  |  "
+                 f"Disk: {scores['disk']}  |  GPU: {scores['gpu']}")
+        entry = {"date": time.strftime("%Y-%m-%d %H:%M:%S"),
+                 "total": scores["total"], "scores": scores,
+                 "system": system_info().get("CPU", "")}
+        save_history_entry(entry)
+        self.update_history_display()
+
+    def update_history_display(self):
+        hist = load_history()
+        self.history_text.config(state="normal")
+        self.history_text.delete("1.0", "end")
+        if not hist:
+            self.history_text.insert("end", "História: zatiaľ žiadny celý test. Po prvom teste sa tu ukáže porovnanie.\n")
+            return
+        best = max(hist, key=lambda x: x.get("total", 0))
+        self.history_text.insert(
+            "end", f"Najlepšie skóre: {best.get('total')} ({best.get('date')})  |  Počet testov: {len(hist)}\n")
+        for h in hist[-3:]:
+            self.history_text.insert(
+                "end", f"  {h.get('date')}  celkom {h.get('total')}  "
+                       f"(CPU {h.get('scores', {}).get('cpu')} / RAM {h.get('scores', {}).get('ram')} / "
+                       f"Disk {h.get('scores', {}).get('disk')} / GPU {h.get('scores', {}).get('gpu')})\n")
+        self.history_text.config(state="disabled")
+
+    # ----- Aktualizacie -----
+    def check_updates_manual(self):
+        threading.Thread(target=self.check_updates, args=(True,),
+                         daemon=True).start()
+
+    def check_updates(self, manual=False):
+        latest, url = check_latest_version()
+        if latest is None:
+            msg = f"Verzia: v{VERSION}  |  Aktualizácie: nepodarilo sa skontrolovať (offline?)"
+            self.root.after(0, lambda: self.update_label.config(text=msg))
+            if manual:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Aktualizácie", "Nepodarilo sa skontrolovať aktualizácie.\nSkontroluj internet a skús znova."))
+            return
+        if version_tuple(latest) > version_tuple(VERSION):
+            msg = f"Verzia: v{VERSION}  |  Nová verzia v{latest} je dostupná!"
+            self.root.after(0, lambda: self.update_label.config(text=msg, fg="#dc2626"))
+            self.root.after(0, lambda: self.ask_update(latest, url))
+        else:
+            msg = f"Verzia: v{VERSION}  |  Máš najnovšiu verziu (v{latest})"
+            self.root.after(0, lambda: self.update_label.config(text=msg, fg="#15803d"))
+            if manual:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Aktualizácie", f"Máš najnovšiu verziu v{VERSION}."))
+
+    def ask_update(self, latest, url):
+        if messagebox.askyesno("Nová verzia",
+                f"Je dostupná nová verzia v{latest} (ty máš v{VERSION}).\n"
+                "Chceš otvoriť stránku na stiahnutie?\n"
+                "Starý exe nemusíš mazať ručne — nový si stiahni a starý prepíš / vymaž až potom."):
+            webbrowser.open(url or RELEASES_URL)
 
     def pts_score(self):
         try:

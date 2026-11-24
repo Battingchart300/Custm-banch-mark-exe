@@ -1,4 +1,4 @@
-# PTS Benchmark v1.2.0
+# PTS Benchmark v0.1
 
 Benchmark app pre Windows 10 / 11 — CPU + RAM + Disk + GPU + Stress test v jednom .exe.
 
@@ -12,9 +12,11 @@ Benchmark app pre Windows 10 / 11 — CPU + RAM + Disk + GPU + Stress test v jed
 - **PTS skóre** — orientačné číslo z 4 testov, nie porovnatelné s Cinebench / 3DMark
 - **Uložiť** — výsledok do .json
 
-## Stress test (nové v 1.2.0)
+## Stress test (nové v 1.2.0, vlastný čas v 1.3.0)
 
 - Dĺžka: 15 min / 30 min / 1 hod / 2 hod / **4 hod** / Do zastavenia
+- **Vlastný čas (1.3.0):** klikni do poľa s dĺžkou a napíš vlastný čas — napr. `45 min`, `90 min`, `3 hod`, `2.5 hod` (1 min – 8 hod). Zlý formát appka odmietne s hláškou.
+- **Rýchly test:** vedľa tlačidla Uložiť je `Test (s):` — dĺžka CPU/RAM testu v sekundách, 1–10 s, štandardne 3 s.
 - Zaškrtni čo má zaťažovať: CPU + RAM + GPU
 - Zaťažuje všetky jadrá CPU na 100 %, kopíruje RAM a renderuje GPU
 - **Stop** kedykoľvek, log sa uloží do `pts_stress_log.txt`
@@ -43,3 +45,20 @@ Veľkosť exe: cca 10–15 MB.
 
 - Len stiahni .exe a spusti — žiadny Python, žiadny build.
 - Dlhy stress test (2–4 h) len so súhlasom učiteľa a len keď pri PC niekto je. Školský PC nie je tvoj — nezaťažuj ho bez povolenia.
+
+## Kontrola aktualizácií (nové v 0.1)
+
+- Appka pri štarte sama skontroluje GitHub Releases, či je novšia verzia.
+- Hore v okne vždy vidíš: `Verzia: v0.1 | Máš najnovšiu verziu` alebo `Nová verzia v0.2 je dostupná!`
+- Tlačidlo **Skontrolovať aktualizácie** skontroluje ručne.
+- Ak je nová verzia, appka sa len opýta, či chceš otvoriť stránku na stiahnutie — nič sama nesťahuje ani neinštaluje.
+- Nemusíš v kuse sťahovať a mazať: starý exe prepíšeš novým, až keď nová verzia naozaj vyjde.
+- Bez internetu len napíše, že sa nepodarilo skontrolovať — appka normálne funguje ďalej.
+
+## Novabench-style skóre a história (nové v 0.1)
+
+- Po celom teste: **celkové skóre 0–1000** + podskóre CPU / RAM / Disk / GPU (každé 0–1000)
+- Váhy: CPU 40 %, RAM 20 %, Disk 20 %, GPU 20 % — ako Novabench, len s našimi testami
+- **História:** každý celý test sa uloží do `pts_history.json` (max 20 záznamov)
+- V appke vidíš najlepšie skóre, počet testov a posledné 3 behy — porovnáš, či PC po zmene ide lepšie alebo horšie
+- Výsledok sa dá uložiť aj do .json cez tlačidlo Uložiť
