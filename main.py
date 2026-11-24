@@ -25,7 +25,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "PTS Benchmark"
-VERSION = "0.3"
+VERSION = "0.4"
 REPO = "Battingchart300/Custm-banch-mark-exe"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 CPU_DURATION = 3.0
@@ -180,9 +180,20 @@ except Exception:
 # ---------- System info ----------
 
 def run_cmd(cmd):
+    """Spusti prikaz na pozadi - na Windows bez otvarania konzoly.
+    Bez toho by kazde volanie wmic / powershell / nvidia-smi (kazde 2 s)
+    blikalo ciernym oknom konzoly."""
     try:
+        kw = {}
+        if sys.platform == "win32":
+            # Skryte okno konzoly: CREATE_NO_WINDOW + STARTUPINFO
+            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = subprocess.SW_HIDE
+            kw["startupinfo"] = si
         r = subprocess.run(cmd, capture_output=True, text=True,
-                           timeout=8, shell=False)
+                           timeout=8, shell=False, **kw)
         return (r.stdout or "").strip()
     except Exception:
         return ""
@@ -592,7 +603,7 @@ class BenchApp:
         top = tk.Frame(root, padx=12, pady=8)
         top.pack(fill="x")
         tk.Label(top, text=APP_NAME, font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.3",
+        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.4",
                  font=("Segoe UI", 10), fg="#666").pack(anchor="w")
         upd = tk.Frame(top)
         upd.pack(fill="x", pady=2)
@@ -926,26 +937,28 @@ class BenchApp:
         self.log(f"  GPU: {gpu} ({vram} GB)\n")
         win = tk.Toplevel(self.root)
         win.title("GPU test")
-        # Okno ostane tam, kde je: pevna velkost, nie je topmost,
-        # nevola sa focus ani lift, takze neskace dopredu/dozadu.
+        # Okno sa da zmenit velkostou (mensie aj vacsie), ostane tam, kde je:
+        # nie je topmost, nevola sa focus ani lift, takze neskace dopredu/dozadu.
         win.geometry("640x380")
-        win.resizable(False, False)
+        win.resizable(True, True)
         try:
             win.attributes("-topmost", False)
         except Exception:
             pass
         win.protocol("WM_DELETE_WINDOW", lambda: STOP_ALL.set())
         cv = tk.Canvas(win, width=640, height=360, bg="black")
-        cv.pack()
+        cv.pack(fill="both", expand=True)
         colors = ["red", "green", "blue", "yellow", "cyan", "magenta", "white"]
         frames = 0
         end = time.perf_counter() + 3.0
         while time.perf_counter() < end:
             if not win.winfo_exists():
                 break
+            cw = max(cv.winfo_width(), 100)
+            ch = max(cv.winfo_height(), 100)
             cv.delete("all")
             for _ in range(60):
-                x, y = random.randint(0, 600), random.randint(0, 320)
+                x, y = random.randint(0, max(cw - 40, 1)), random.randint(0, max(ch - 40, 1))
                 c = random.choice(colors)
                 cv.create_rectangle(x, y, x + 40, y + 40, fill=c, outline="")
                 cv.create_oval(x, y, x + 25, y + 25, fill=c, outline="")
@@ -1000,16 +1013,16 @@ class BenchApp:
     def open_gpu_stress_window(self):
         self.gpu_win = tk.Toplevel(self.root)
         self.gpu_win.title("GPU stress")
-        # Rovnako ako GPU test: pevna velkost, nie topmost, neskace dopredu/dozadu.
+        # Rovnako ako GPU test: da sa zmenit velkostou, nie topmost, neskace.
         self.gpu_win.geometry("640x380")
-        self.gpu_win.resizable(False, False)
+        self.gpu_win.resizable(True, True)
         try:
             self.gpu_win.attributes("-topmost", False)
         except Exception:
             pass
         self.gpu_win.protocol("WM_DELETE_WINDOW", self.stop_all)
         self.gpu_cv = tk.Canvas(self.gpu_win, width=640, height=360, bg="black")
-        self.gpu_cv.pack()
+        self.gpu_cv.pack(fill="both", expand=True)
         self.gpu_stress_frame()
 
     def gpu_stress_frame(self):
@@ -1018,9 +1031,11 @@ class BenchApp:
         try:
             cv = self.gpu_cv
             cv.delete("all")
+            cw = max(cv.winfo_width(), 100)
+            ch = max(cv.winfo_height(), 100)
             colors = ["red", "green", "blue", "yellow", "cyan", "magenta", "white"]
             for _ in range(80):
-                x, y = random.randint(0, 600), random.randint(0, 320)
+                x, y = random.randint(0, max(cw - 40, 1)), random.randint(0, max(ch - 40, 1))
                 c = random.choice(colors)
                 cv.create_rectangle(x, y, x + 40, y + 40, fill=c, outline="")
             self.gpu_win.update_idletasks()

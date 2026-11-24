@@ -101,3 +101,14 @@ Veľkosť exe: cca 10–15 MB.
 - Tlačidlo **Aktualizovať a reštartovať**: stiahne nový exe z GitHub Releases, prepíše starý a appku reštartuje. Nemusíš nič sťahovať ani mazať ručne.
 - Ako to funguje: nový exe sa stiahne ako `PTS-Benchmark-update.exe`, potom `update.bat` počká 2 s, prepíše starý exe novým, spustí ho a sám sa vymaže. Bežiaci exe sa totiž nedá prepísať priamo.
 - Kontrola beží pri štarte aj tlačidlom "Skontrolovať aktualizácie". Ak je test v behu, aktualizácia počká — najprv Stop všetko.
+
+## Veľkosť GPU okna + kto je autor (nové v 0.4)
+
+- GPU test okno aj GPU stress okno sa dajú zmenšovať a zväčšovať myšou — kreslenie sa prispôsobí veľkosti okna.
+- Exe má teraz vložené údaje o autorovi: `version_info.txt` — vo vlastnostiach súboru (pravý klik → Vlastnosti → Podrobnosti) je CompanyName **BattingChart300**, ProductName PTS Benchmark, verzia 0.4.
+- **SmartScreen varovanie:** to modré okno "Windows chránil váš počítač" / "Neznámy vydavateľ" je od Microsoft Defender SmartScreen. Vydavateľa tam nejde len tak napísať textom — berie sa z digitálneho podpisu exe súboru. Ten podpis je platený certifikát (cca 100–300 €/rok, overenie identity, 18+), takže ako 16-ročný ho teraz nekúpiš. Čo pomáha zadarmo: údaje o autorovi v exe (už pridané), sťahovanie z GitHub Releases a čas — čím viac ľudí exe stiahne a spustí, tým skôr SmartScreen varovanie zmizne. Dovtedy sa dá kliknúť "Ďalšie informácie" → "Spustiť aj tak".
+
+## Žiadne blikajúce konzoly (nové v 0.4)
+
+- Všetky pomocné príkazy (wmic, PowerShell, nvidia-smi) bežia na pozadí bez otvárania konzoly — `run_cmd()` používa na Windows `CREATE_NO_WINDOW` + skryté `STARTUPINFO`. Predtým každé volanie (každé 2 s) blikalo čiernym oknom.
+- Samotný exe sa buildí s `--noconsole`, takže ani appka sama neotvára konzolu. Updater `.bat` sa tiež spúšťa s `CREATE_NO_WINDOW`.
