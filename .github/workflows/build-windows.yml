@@ -1,0 +1,33 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: pip install pyinstaller psutil
+      - name: Build exe
+        run: pyinstaller --onefile --noconsole --name PTS-Benchmark main.py
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PTS-Benchmark-windows
+          path: dist/PTS-Benchmark.exe
+      - name: Create Release v1.2.0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.2.0 dist/PTS-Benchmark.exe --title "PTS Benchmark v1.2.0" --notes "Windows 10/11 exe - CPU + RAM + Disk + GPU + Stress test az 4 h + graf teploty / zatazenia" || gh release upload v1.2.0 dist/PTS-Benchmark.exe --clobber
