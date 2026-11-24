@@ -1,4 +1,4 @@
-# PTS Benchmark v0.2
+# PTS Benchmark v0.3
 
 Benchmark app pre Windows 10 / 11 — CPU + RAM + Disk + GPU + Stress test v jednom .exe.
 
@@ -49,7 +49,7 @@ Veľkosť exe: cca 10–15 MB.
 ## Kontrola aktualizácií (nové v 0.1)
 
 - Appka pri štarte sama skontroluje GitHub Releases, či je novšia verzia.
-- Hore v okne vždy vidíš: `Verzia: v0.2 | Máš najnovšiu verziu` alebo `Nová verzia v0.2 je dostupná!`
+- Hore v okne vždy vidíš: `Verzia: v0.3 | Máš najnovšiu verziu` alebo `Nová verzia v0.3 je dostupná!`
 - Tlačidlo **Skontrolovať aktualizácie** skontroluje ručne.
 - Ak je nová verzia, appka sa len opýta, či chceš otvoriť stránku na stiahnutie — nič sama nesťahuje ani neinštaluje.
 - Nemusíš v kuse sťahovať a mazať: starý exe prepíšeš novým, až keď nová verzia naozaj vyjde.
@@ -94,3 +94,10 @@ Veľkosť exe: cca 10–15 MB.
 - Text pod grafom sa prepíše len keď sa hodnota naozaj zmenila.
 - Teplota CPU sa číta len každých 10 s, nie každé 2 s (PowerShell/WMI volanie brzdilo UI).
 - `log()` ani `set_status()` už nevolajú `update_idletasks()` — to prekresľovalo celé okno a bolo hlavnou príčinou preblikávania.
+
+## Skutočná aktualizácia (nové v 0.3)
+
+- Keď príde nová verzia, appka to **reálne ukáže**: žltý banner hore + červený text pri verzii + okno s otázkou.
+- Tlačidlo **Aktualizovať a reštartovať**: stiahne nový exe z GitHub Releases, prepíše starý a appku reštartuje. Nemusíš nič sťahovať ani mazať ručne.
+- Ako to funguje: nový exe sa stiahne ako `PTS-Benchmark-update.exe`, potom `update.bat` počká 2 s, prepíše starý exe novým, spustí ho a sám sa vymaže. Bežiaci exe sa totiž nedá prepísať priamo.
+- Kontrola beží pri štarte aj tlačidlom "Skontrolovať aktualizácie". Ak je test v behu, aktualizácia počká — najprv Stop všetko.

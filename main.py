@@ -25,7 +25,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "PTS Benchmark"
-VERSION = "0.2"
+VERSION = "0.3"
 REPO = "Battingchart300/Custm-banch-mark-exe"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 CPU_DURATION = 3.0
@@ -122,6 +122,15 @@ def version_tuple(v):
 
 def check_latest_version():
     """Zisti najnovsiu verziu z GitHub Releases. Vrati (verzia, url) alebo (None, None)."""
+    info = check_latest_release()
+    if info is None:
+        return None, None
+    return info["version"], info["html_url"]
+
+
+def check_latest_release():
+    """Cely latest release z GitHubu: verzia, stranka, poznamky, exe asset.
+    Vrati dict alebo None."""
     try:
         req = urllib.request.Request(
             f"https://api.github.com/repos/{REPO}/releases/latest",
@@ -130,10 +139,33 @@ def check_latest_version():
             data = json.load(r)
         tag = str(data.get("tag_name", "")).strip()
         if not tag:
-            return None, None
-        return tag.lstrip("vV"), data.get("html_url") or RELEASES_URL
+            return None
+        asset_url = None
+        asset_name = None
+        for a in data.get("assets", []) or []:
+            if str(a.get("name", "")).lower().endswith(".exe"):
+                asset_url = a.get("browser_download_url")
+                asset_name = a.get("name")
+                break
+        return {"version": tag.lstrip("vV"),
+                "html_url": data.get("html_url") or RELEASES_URL,
+                "body": (data.get("body") or "")[:500],
+                "asset_url": asset_url,
+                "asset_name": asset_name or "PTS-Benchmark.exe"}
     except Exception:
-        return None, None
+        return None
+
+
+def build_updater_bat(exe_name, new_name):
+    """Windows .bat, ktory po vypnuti appky prepise stary exe novym a spusti ho.
+    Bezi az ked appka skonci, lebo bezici exe sa neda prepisat."""
+    return (
+        "@echo off\r\n"
+        "timeout /t 2 /nobreak >nul\r\n"
+        f'move /y "{new_name}" "{exe_name}"\r\n'
+        f'start "" "{exe_name}"\r\n'
+        'del "%~f0"\r\n'
+    )
 
 
 # psutil je volitelny - ak je, mame presne % CPU / RAM / teplotu na Linuxe
@@ -560,7 +592,7 @@ class BenchApp:
         top = tk.Frame(root, padx=12, pady=8)
         top.pack(fill="x")
         tk.Label(top, text=APP_NAME, font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.2",
+        tk.Label(top, text="CPU + RAM + Disk + GPU  |  Stress test až 4 h, vlastný čas  |  v0.3",
                  font=("Segoe UI", 10), fg="#666").pack(anchor="w")
         upd = tk.Frame(top)
         upd.pack(fill="x", pady=2)
@@ -570,6 +602,16 @@ class BenchApp:
         tk.Button(upd, text="Skontrolovať aktualizácie",
                   command=self.check_updates_manual,
                   font=("Segoe UI", 9)).pack(side="right")
+        # Banner, co sa ukaze len ked pride nova verzia - realne, nie len text
+        self.update_banner = tk.Frame(top, bg="#fef3c7")
+        self.update_banner_label = tk.Label(
+            self.update_banner, text="", font=("Segoe UI", 10, "bold"),
+            bg="#fef3c7", fg="#92400e")
+        self.update_banner_label.pack(side="left", padx=6, pady=4)
+        tk.Button(self.update_banner, text="Aktualizovať a reštartovať",
+                  command=self.download_update,
+                  bg="#16a34a", fg="white", font=("Segoe UI", 10, "bold")).pack(side="right", padx=6)
+        self.latest_info = None
 
         info = tk.Frame(root, padx=12)
         info.pack(fill="x")
@@ -1113,31 +1155,93 @@ class BenchApp:
                          daemon=True).start()
 
     def check_updates(self, manual=False):
-        latest, url = check_latest_version()
-        if latest is None:
+        info = check_latest_release()
+        if info is None:
             msg = f"Verzia: v{VERSION}  |  Aktualizácie: nepodarilo sa skontrolovať (offline?)"
             self.root.after(0, lambda: self.update_label.config(text=msg))
             if manual:
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Aktualizácie", "Nepodarilo sa skontrolovať aktualizácie.\nSkontroluj internet a skús znova."))
             return
+        latest = info["version"]
         if version_tuple(latest) > version_tuple(VERSION):
+            self.latest_info = info
             msg = f"Verzia: v{VERSION}  |  Nová verzia v{latest} je dostupná!"
             self.root.after(0, lambda: self.update_label.config(text=msg, fg="#dc2626"))
-            self.root.after(0, lambda: self.ask_update(latest, url))
+            self.root.after(0, lambda: self.show_update_banner(latest))
+            self.root.after(0, lambda: self.ask_update(latest))
         else:
+            self.latest_info = None
+            self.root.after(0, self.update_banner.pack_forget)
             msg = f"Verzia: v{VERSION}  |  Máš najnovšiu verziu (v{latest})"
             self.root.after(0, lambda: self.update_label.config(text=msg, fg="#15803d"))
             if manual:
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Aktualizácie", f"Máš najnovšiu verziu v{VERSION}."))
 
-    def ask_update(self, latest, url):
+    def show_update_banner(self, latest):
+        self.update_banner_label.config(
+            text=f"⬆ Nová verzia v{latest} je dostupná! (ty máš v{VERSION})")
+        self.update_banner.pack(fill="x", pady=4)
+
+    def ask_update(self, latest):
         if messagebox.askyesno("Nová verzia",
                 f"Je dostupná nová verzia v{latest} (ty máš v{VERSION}).\n"
-                "Chceš otvoriť stránku na stiahnutie?\n"
-                "Starý exe nemusíš mazať ručne — nový si stiahni a starý prepíš / vymaž až potom."):
-            webbrowser.open(url or RELEASES_URL)
+                "Aktualizovať teraz? Stiahne sa nový exe a appka sa reštartuje."):
+            self.download_update()
+
+    def download_update(self):
+        info = self.latest_info
+        if not info or not info.get("asset_url"):
+            messagebox.showwarning("Aktualizácia",
+                "Nenašiel sa exe súbor v novej verzii.\nSkús znova neskôr.")
+            return
+        if self.running or self.stress_running:
+            messagebox.showwarning("Beží test",
+                "Najprv zastav bežiaci test (Stop všetko), potom aktualizuj.")
+            return
+        self.update_label.config(text=f"Sťahujem verziu v{info['version']} ...", fg="#2563eb")
+        threading.Thread(target=self._download_update_job, args=(info,), daemon=True).start()
+
+    def _download_update_job(self, info):
+        try:
+            if getattr(sys, "frozen", False):
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+                exe_name = os.path.basename(sys.executable)
+            else:
+                exe_dir = os.path.dirname(os.path.abspath(__file__))
+                exe_name = "PTS-Benchmark.exe"
+            new_name = "PTS-Benchmark-update.exe"
+            new_path = os.path.join(exe_dir, new_name)
+            req = urllib.request.Request(info["asset_url"],
+                headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
+            with urllib.request.urlopen(req, timeout=60) as r, open(new_path, "wb") as f:
+                while True:
+                    chunk = r.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            if not getattr(sys, "frozen", False):
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Aktualizácia stiahnutá",
+                    f"Nový exe je stiahnutý ako:\n{new_path}\n"
+                    "Toto je beh zo zdrojového kódu, nie z exe - reštart nejde, "
+                    "nahraď exe súbor ručne."))
+                return
+            bat_path = os.path.join(exe_dir, "update.bat")
+            with open(bat_path, "w", encoding="utf-8", newline="") as f:
+                f.write(build_updater_bat(exe_name, new_name))
+            self.root.after(0, lambda: self.update_label.config(
+                text=f"Aktualizácia v{info['version']} stiahnutá - reštartujem ...", fg="#15803d"))
+            time.sleep(0.5)
+            subprocess.Popen(["cmd", "/c", bat_path], cwd=exe_dir,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+            self.root.after(0, self.root.destroy)
+        except Exception as e:
+            self.root.after(0, lambda: self.update_label.config(
+                text=f"Aktualizácia zlyhala: {e}", fg="#dc2626"))
+            self.root.after(0, lambda: messagebox.showerror(
+                "Aktualizácia zlyhala", f"Nepodarilo sa stiahnuť novú verziu:\n{e}"))
 
     def pts_score(self):
         try:
